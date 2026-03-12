@@ -51,6 +51,45 @@ H2H_PRESETS = [
     {"label": "🌿 ကျန်းမာရေး", "q": "stress လျော့ချဖို့ အကောင်းဆုံး နည်းလမ်း ၃ ခု ဘာတွေလဲ?"}
 ]
 
+# Prompt templates
+PROMPT_GENERATE_ANSWER = "Answer this question in 2-3 sentences in Burmese. Be clear and helpful.\n\nQuestion: {question}\n\nAnswer:"
+
+PROMPT_GENERATE_ANSWER_SIMPLE = "Answer this question in 2-3 sentences in Burmese.\n\nQuestion: {question}\n\nAnswer:"
+
+PROMPT_GENERATE_ANSWER_DETAILED = "Answer in detail in Burmese (2-3 sentences).\n\nQuestion: {question}\n\nAnswer:"
+
+PROMPT_GENERATE_ANSWER_BRIEF = "Answer briefly in Burmese (1-2 sentences).\n\nQuestion: {question}\n\nAnswer:"
+
+PROMPT_JUDGE_SELF = """You are an AI judge. Evaluate this answer fairly (1-5 scale).
+
+Question: {question}
+Answer: {answer}
+
+Respond ONLY as JSON:
+{{"score": <1-5>, "reasoning": "<2-3 sentences in English>"}}
+
+1=Very bad, 2=Poor, 3=Acceptable, 4=Good, 5=Excellent"""
+
+PROMPT_JUDGE_REFERENCE = """Compare generated answer to reference answer.
+
+Question: {question}
+Reference: {reference}
+Generated: {generated}
+
+Does generated answer convey same core meaning?
+Respond ONLY as JSON:
+{{"match": true or false, "reasoning": "<2-3 sentences in English>"}}"""
+
+PROMPT_JUDGE_H2H = """Judge which answer is better.
+
+Question: {question}
+Answer A: {answer_a}
+Answer B: {answer_b}
+
+Which is better overall?
+Respond ONLY as JSON:
+{{"winner": "A" or "B", "reasoning": "<2-3 sentences in English>"}}"""
+
 # HTML Template
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -668,11 +707,10 @@ def api_generate_self():
         if not question:
             return jsonify({'error': 'Question required'}), 400
 
+        prompt = PROMPT_GENERATE_ANSWER.format(question=question)
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "user", "content": f"Answer this question in 2-3 sentences in Burmese. Be clear and helpful.\n\nQuestion: {question}\n\nAnswer:"}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.7
         )
         answer = response.choices[0].message.content.strip()
@@ -689,16 +727,7 @@ def api_judge_self():
         question = data.get('question', '').strip()
         answer = data.get('answer', '').strip()
 
-        prompt = f"""You are an AI judge. Evaluate this answer fairly (1-5 scale).
-
-Question: {question}
-Answer: {answer}
-
-Respond ONLY as JSON:
-{{"score": <1-5>, "reasoning": "<2-3 sentences in English>"}}
-
-1=Very bad, 2=Poor, 3=Acceptable, 4=Good, 5=Excellent"""
-
+        prompt = PROMPT_JUDGE_SELF.format(question=question, answer=answer)
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -721,11 +750,10 @@ def api_generate_ref():
         if not question:
             return jsonify({'error': 'Question required'}), 400
 
+        prompt = PROMPT_GENERATE_ANSWER_SIMPLE.format(question=question)
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "user", "content": f"Answer this question in 2-3 sentences in Burmese.\n\nQuestion: {question}\n\nAnswer:"}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.7
         )
         answer = response.choices[0].message.content.strip()
@@ -743,16 +771,11 @@ def api_judge_ref():
         reference = data.get('reference', '').strip()
         generated = data.get('generated', '').strip()
 
-        prompt = f"""Compare generated answer to reference answer.
-
-Question: {question}
-Reference: {reference}
-Generated: {generated}
-
-Does generated answer convey same core meaning?
-Respond ONLY as JSON:
-{{"match": true or false, "reasoning": "<2-3 sentences in English>"}}"""
-
+        prompt = PROMPT_JUDGE_REFERENCE.format(
+            question=question,
+            reference=reference,
+            generated=generated
+        )
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -775,18 +798,17 @@ def api_generate_h2h():
         if not question:
             return jsonify({'error': 'Question required'}), 400
 
+        prompt_a = PROMPT_GENERATE_ANSWER_DETAILED.format(question=question)
+        prompt_b = PROMPT_GENERATE_ANSWER_BRIEF.format(question=question)
+
         resp_a = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "user", "content": f"Answer in detail in Burmese (2-3 sentences).\n\nQuestion: {question}\n\nAnswer:"}
-            ],
+            messages=[{"role": "user", "content": prompt_a}],
             temperature=0.7
         )
         resp_b = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "user", "content": f"Answer briefly in Burmese (1-2 sentences).\n\nQuestion: {question}\n\nAnswer:"}
-            ],
+            messages=[{"role": "user", "content": prompt_b}],
             temperature=0.7
         )
         answer_a = resp_a.choices[0].message.content.strip()
@@ -805,16 +827,11 @@ def api_judge_h2h():
         answer_a = data.get('answer_a', '').strip()
         answer_b = data.get('answer_b', '').strip()
 
-        prompt = f"""Judge which answer is better.
-
-Question: {question}
-Answer A: {answer_a}
-Answer B: {answer_b}
-
-Which is better overall?
-Respond ONLY as JSON:
-{{"winner": "A" or "B", "reasoning": "<2-3 sentences in English>"}}"""
-
+        prompt = PROMPT_JUDGE_H2H.format(
+            question=question,
+            answer_a=answer_a,
+            answer_b=answer_b
+        )
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
