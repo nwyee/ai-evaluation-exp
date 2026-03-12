@@ -1,38 +1,21 @@
 """
-GPT Model Speed Benchmark - Compare OpenAI GPT Models Speed & Performance
-
-Tests how fast different GPT models (GPT-4o Mini, GPT-4o, GPT-4 Turbo) respond
-Measures time to first token and total response time
+Speed Benchmark Blueprint
 """
 
-import os
-import sys
 import time
-import json
-from flask import Flask, render_template_string, request, jsonify
-from openai import OpenAI
-from dotenv import load_dotenv
-from pathlib import Path
+from flask import Blueprint, render_template_string, request, jsonify
 
-# Load environment
-current_dir = Path(__file__).parent
-for directory in [current_dir, current_dir.parent, current_dir.parent.parent]:
-    env_file = directory / ".env"
-    if env_file.exists():
-        load_dotenv(env_file)
-        break
+# Create blueprint
+speed_benchmark_bp = Blueprint('speed_benchmark', __name__, url_prefix='/speed-benchmark')
 
-# Initialize OpenAI client
-api_key = os.getenv("PROXY_API_KEY") or os.getenv("OPENAI_API_KEY")
-base_url = os.getenv("PROXY_BASE_URL")
+# Get client from app config
+def get_client():
+    from flask import current_app
+    return current_app.config['OPENAI_CLIENT']
 
-if not api_key:
-    print("❌ Error: PROXY_API_KEY or OPENAI_API_KEY not set in .env")
-    sys.exit(1)
-
-client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
-
-app = Flask(__name__)
+def get_model():
+    from flask import current_app
+    return current_app.config['MODEL_NAME']
 
 # Model configurations
 MODELS = [
@@ -41,7 +24,7 @@ MODELS = [
     {"key": "turbo", "id": "gpt-4.1", "label": "GPT-4.1", "params": "~175B"},
 ]
 
-# Sample prompts for testing (Myanmar language)
+# Sample prompts
 PROMPTS = [
     {"label": "🥗 ကျန်းမာရေး", "q": "ကျန်းမာရေးကောင်းဖို့ ဘာတွေ လုပ်သင့်သလဲ?"},
     {"label": "😴 အိပ်ရေး", "q": "ညဘက် ကောင်းကောင်းအိပ်ဖို့ နည်းလမ်းတွေ ပြောပြပါ။"},
@@ -50,6 +33,14 @@ PROMPTS = [
     {"label": "🤖 AI", "q": "AI engineering ဆိုတာ ဘာလဲ? ရှင်းပြပါ။"},
 ]
 
+# Pricing per 1M tokens
+PRICING = {
+    "gpt-4.1-nano": {"input": 0.08, "output": 0.30},
+    "gpt-4.1-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4.1": {"input": 5.00, "output": 15.00},
+}
+
+# Html template for the benchmark page
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -617,7 +608,7 @@ async function runBenchmark() {
       btn.textContent = `⏳ Racing... ${m.label} (${i+1}/3)`;
 
       try {
-        const res = await fetch('/api/benchmark', {
+        const res = await fetch('/speed-benchmark/api/benchmark', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({question: q, model_key: m.key})
@@ -694,24 +685,31 @@ async function runBenchmark() {
 </html>
 """
 
-@app.route('/')
+
+# Import HTML template from original file
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Routes
+@speed_benchmark_bp.route('/')
 def index():
+    from flask import current_app
+    # Add navigation if function exists
+    template = HTML_TEMPLATE
+    if hasattr(current_app, 'add_navigation'):
+        template = current_app.add_navigation(HTML_TEMPLATE, "Speed Benchmark")
+
     return render_template_string(
-        HTML_TEMPLATE,
+        template,
         presets=PROMPTS,
         models=MODELS
     )
 
-# Pricing per 1M tokens (as of latest pricing)
-PRICING = {
-    "gpt-4.1-nano": {"input": 0.08, "output": 0.30},
-    "gpt-4.1-mini": {"input": 0.15, "output": 0.60},
-    "gpt-4.1": {"input": 5.00, "output": 15.00},
-}
-
-@app.route('/api/benchmark', methods=['POST'])
+@speed_benchmark_bp.route('/api/benchmark', methods=['POST'])
 def benchmark():
     try:
+        client = get_client()
         data = request.json
         question = data.get('question', '').strip()
         model_key = data.get('model_key', 'mini')
@@ -720,8 +718,8 @@ def benchmark():
             return jsonify({'error': 'Question required'}), 400
 
         # Find model
-        model = next((m for m in MODELS if m['key'] == model_key), None)
-        if not model:
+        model_obj = next((m for m in MODELS if m['key'] == model_key), None)
+        if not model_obj:
             return jsonify({'error': 'Invalid model key'}), 400
 
         # Create prompt
@@ -736,14 +734,14 @@ Answer:"""
 
         # Make request
         response = client.chat.completions.create(
-            model=model['id'],
+            model=model_obj['id'],
             max_tokens=300,
             temperature=0.7,
             messages=[{"role": "user", "content": prompt}]
         )
 
         # Calculate time
-        total_time = int((time.time() - start_time) * 1000)  # Convert to ms
+        total_time = int((time.time() - start_time) * 1000)
 
         # Extract response
         text = response.choices[0].message.content.strip()
@@ -754,10 +752,10 @@ Answer:"""
         elif hasattr(response.usage, 'completion_tokens'):
             output_tokens = response.usage.completion_tokens
         else:
-            output_tokens = len(text.split())  # Fallback to word count
+            output_tokens = len(text.split())
 
         # Calculate estimated cost
-        pricing = PRICING.get(model['id'], {"input": 0, "output": 0})
+        pricing = PRICING.get(model_obj['id'], {"input": 0, "output": 0})
         cost_cents = (output_tokens * pricing['output'] / 1_000_000) * 100
 
         return jsonify({
@@ -769,16 +767,3 @@ Answer:"""
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    print("\n" + "="*70)
-    print("🏁 GPT Model Speed Benchmark Server Starting...")
-    print("="*70)
-    print("\n📖 Open your browser: http://localhost:5003")
-    print("\nExperiment:")
-    print("  • Compare speed of GPT-4o Mini, GPT-4o, and GPT-4 Turbo")
-    print("  • Measure total response time and token count")
-    print("  • Estimate cost per query")
-    print("  • See which model is best for your use case")
-    print("\n" + "="*70 + "\n")
-    app.run(debug=True, port=5003)

@@ -1,41 +1,25 @@
 """
-AI-as-a-Judge Web Application (Minimal UI - Flask)
-
-Inspired by ai_judge_experiment.html design
-Three evaluation modes with a single-page web interface
+AI Judge Blueprint
 """
 
-import os
 import json
-import sys
-from flask import Flask, render_template_string, request, jsonify
+from flask import Blueprint, render_template_string, request, jsonify
 from openai import OpenAI
-from dotenv import load_dotenv
-from pathlib import Path
+import os
 
-# Load environment
-current_dir = Path(__file__).parent
-for directory in [current_dir, current_dir.parent, current_dir.parent.parent]:
-    env_file = directory / ".env"
-    if env_file.exists():
-        load_dotenv(env_file)
-        break
+# Create blueprint
+ai_judge_bp = Blueprint('ai_judge', __name__, url_prefix='/ai-judge')
 
-# Initialize OpenAI client
-api_key = os.getenv("PROXY_API_KEY") or os.getenv("OPENAI_API_KEY")
-base_url = os.getenv("PROXY_BASE_URL")
+# Get client from app config (will be set by main app)
+def get_client():
+    from flask import current_app
+    return current_app.config['OPENAI_CLIENT']
 
-if not api_key:
-    print("❌ Error: PROXY_API_KEY or OPENAI_API_KEY not set in .env")
-    sys.exit(1)
+def get_model():
+    from flask import current_app
+    return current_app.config['MODEL_NAME']
 
-client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
-model = os.getenv("MODEL_NAME", "gpt-4.1-mini")
-
-app = Flask(__name__)
-
-# ─── Preset Data ──────────────────────────────────────────────────
-
+# Preset data
 SELF_PRESETS = [
     {"label": "🍜 မနက်စာ", "q": "ကောင်းတဲ့ မနက်စာ ဘာစားသင့်သလဲ?"},
     {"label": "😴 အိပ်ရေး", "q": "ညဘက် အိပ်ရေးဝဝ အိပ်ဖို့ ဘာလုပ်သင့်သလဲ?"},
@@ -67,8 +51,7 @@ H2H_PRESETS = [
     {"label": "🌿 ကျန်းမာရေး", "q": "stress လျော့ချဖို့ အကောင်းဆုံး နည်းလမ်း ၃ ခု ဘာတွေလဲ?"}
 ]
 
-# ─── HTML Template ────────────────────────────────────────────────
-
+# HTML Template
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -460,7 +443,7 @@ async function generateSelfAnswer() {
     btn.disabled = true;
     btn.textContent = '⏳ အလုပ်လုပ်နေတယ်...';
     try {
-        const res = await fetch('/api/generate_self', {
+        const res = await fetch('/ai-judge/api/generate_self', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({question: q})
@@ -489,7 +472,7 @@ async function runSelf() {
     result.innerHTML = '<div class="loading"><div class="spinner"></div> AI Judge တွေးနေတယ်...</div>';
     result.classList.add('visible');
     try {
-        const res = await fetch('/api/judge_self', {
+        const res = await fetch('/ai-judge/api/judge_self', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({question: q, answer: a})
@@ -525,7 +508,7 @@ async function generateRefAnswer() {
     btn.disabled = true;
     btn.textContent = '⏳ အလုပ်လုပ်နေတယ်...';
     try {
-        const res = await fetch('/api/generate_ref', {
+        const res = await fetch('/ai-judge/api/generate_ref', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({question: q})
@@ -555,7 +538,7 @@ async function runRef() {
     result.innerHTML = '<div class="loading"><div class="spinner"></div> AI Judge နှိုင်းယှဉ်နေတယ်...</div>';
     result.classList.add('visible');
     try {
-        const res = await fetch('/api/judge_ref', {
+        const res = await fetch('/ai-judge/api/judge_ref', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({question: q, reference: ref, generated: gen})
@@ -591,7 +574,7 @@ async function generateH2HAnswers() {
     btn.disabled = true;
     btn.textContent = '⏳ နှစ်ခု ထုတ်နေတယ်...';
     try {
-        const res = await fetch('/api/generate_h2h', {
+        const res = await fetch('/ai-judge/api/generate_h2h', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({question: q})
@@ -622,7 +605,7 @@ async function runH2H() {
     result.innerHTML = '<div class="loading"><div class="spinner"></div> AI Judge ဆုံးဖြတ်နေတယ်...</div>';
     result.classList.add('visible');
     try {
-        const res = await fetch('/api/judge_h2h', {
+        const res = await fetch('/ai-judge/api/judge_h2h', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({question: q, answer_a: a, answer_b: b})
@@ -656,21 +639,30 @@ async function runH2H() {
 </html>
 """
 
-# ─── API Routes ───────────────────────────────────────────────────
-
-@app.route('/')
+# Routes
+@ai_judge_bp.route('/')
 def index():
+    from flask import current_app
+    model_name = get_model()
+
+    # Add navigation if function exists
+    template = HTML_TEMPLATE
+    if hasattr(current_app, 'add_navigation'):
+        template = current_app.add_navigation(HTML_TEMPLATE, "AI as a Judge")
+
     return render_template_string(
-        HTML_TEMPLATE,
-        model_name=model,
+        template,
+        model_name=model_name,
         self_presets=SELF_PRESETS,
         ref_presets=REF_PRESETS,
         h2h_presets=H2H_PRESETS
     )
 
-@app.route('/api/generate_self', methods=['POST'])
+@ai_judge_bp.route('/api/generate_self', methods=['POST'])
 def api_generate_self():
     try:
+        client = get_client()
+        model = get_model()
         data = request.json
         question = data.get('question', '').strip()
         if not question:
@@ -688,9 +680,11 @@ def api_generate_self():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/judge_self', methods=['POST'])
+@ai_judge_bp.route('/api/judge_self', methods=['POST'])
 def api_judge_self():
     try:
+        client = get_client()
+        model = get_model()
         data = request.json
         question = data.get('question', '').strip()
         answer = data.get('answer', '').strip()
@@ -717,9 +711,11 @@ Respond ONLY as JSON:
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/generate_ref', methods=['POST'])
+@ai_judge_bp.route('/api/generate_ref', methods=['POST'])
 def api_generate_ref():
     try:
+        client = get_client()
+        model = get_model()
         data = request.json
         question = data.get('question', '').strip()
         if not question:
@@ -737,9 +733,11 @@ def api_generate_ref():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/judge_ref', methods=['POST'])
+@ai_judge_bp.route('/api/judge_ref', methods=['POST'])
 def api_judge_ref():
     try:
+        client = get_client()
+        model = get_model()
         data = request.json
         question = data.get('question', '').strip()
         reference = data.get('reference', '').strip()
@@ -767,9 +765,11 @@ Respond ONLY as JSON:
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/generate_h2h', methods=['POST'])
+@ai_judge_bp.route('/api/generate_h2h', methods=['POST'])
 def api_generate_h2h():
     try:
+        client = get_client()
+        model = get_model()
         data = request.json
         question = data.get('question', '').strip()
         if not question:
@@ -795,9 +795,11 @@ def api_generate_h2h():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/judge_h2h', methods=['POST'])
+@ai_judge_bp.route('/api/judge_h2h', methods=['POST'])
 def api_judge_h2h():
     try:
+        client = get_client()
+        model = get_model()
         data = request.json
         question = data.get('question', '').strip()
         answer_a = data.get('answer_a', '').strip()
@@ -823,15 +825,3 @@ Respond ONLY as JSON:
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    print("\n" + "="*70)
-    print("🚀 AI-as-a-Judge Web Server Starting...")
-    print("="*70)
-    print("\n📖 Open your browser and go to: http://localhost:5000")
-    print("\nFeatures:")
-    print("  1️⃣  Self Evaluation - AI scores its own answers")
-    print("  2️⃣  Reference Comparison - Compare against reference")
-    print("  3️⃣  Head-to-Head - Battle two AI answers")
-    print("\n" + "="*70 + "\n")
-    app.run(debug=True, port=5000)

@@ -1,41 +1,23 @@
 """
-Temperature Experiment - Test LLM Creativity at Different Temperatures
-
-Inspired by temperature_experiment.html design
-Tests how temperature=0 gives consistent results and higher temps give creativity
-Run 1 vs Run 2 comparison format
+Temperature Experiment Blueprint
 """
 
-import os
-import json
-import sys
-from flask import Flask, render_template_string, request, jsonify
-from openai import OpenAI
-from dotenv import load_dotenv
-from pathlib import Path
+from flask import Blueprint, render_template_string, request, jsonify
+from difflib import SequenceMatcher
 
-# Load environment
-current_dir = Path(__file__).parent
-for directory in [current_dir, current_dir.parent, current_dir.parent.parent]:
-    env_file = directory / ".env"
-    if env_file.exists():
-        load_dotenv(env_file)
-        break
+# Create blueprint
+temperature_bp = Blueprint('temperature', __name__, url_prefix='/temperature')
 
-# Initialize OpenAI client
-api_key = os.getenv("PROXY_API_KEY") or os.getenv("OPENAI_API_KEY")
-base_url = os.getenv("PROXY_BASE_URL")
+# Get client from app config
+def get_client():
+    from flask import current_app
+    return current_app.config['OPENAI_CLIENT']
 
-if not api_key:
-    print("❌ Error: PROXY_API_KEY or OPENAI_API_KEY not set in .env")
-    sys.exit(1)
+def get_model():
+    from flask import current_app
+    return current_app.config['MODEL_NAME']
 
-client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
-model = os.getenv("MODEL_NAME", "gpt-4.1-mini")
-
-app = Flask(__name__)
-
-# Sample prompts for testing (Myanmar language)
+# Sample prompts
 PROMPTS = [
     {"label": "🥗 ကျန်းမာရေး", "q": "ကျန်းမာရေးကောင်းဖို့ ဘာတွေ လုပ်သင့်သလဲ?"},
     {"label": "😴 အိပ်ရေး", "q": "ညဘက် ကောင်းကောင်းအိပ်ဖို့ နည်းလမ်းတွေ ပြောပြပါ။"},
@@ -44,6 +26,7 @@ PROMPTS = [
     {"label": "🐶 ခွေးမွေး", "q": "ခွေးလေးတစ်ကောင် မွေးမယ်ဆိုရင် ဘာတွေ ပြင်ဆင်ရမလဲ?"},
 ]
 
+#  HTML template for the temperature experiment page
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -514,7 +497,7 @@ function setLoading(run, t) {
 async function showMatch(t, a, b) {
   const el = document.getElementById('match-' + t);
   try {
-    const compareRes = await fetch('/api/compare', {
+    const compareRes = await fetch('/temperature/api/compare', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({text1: a, text2: b})
@@ -559,7 +542,7 @@ Question: ${q}
 Answer:`;
 
   try {
-    const r1_0 = await fetch('/api/generate', {
+    const r1_0 = await fetch('/temperature/api/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({question: prompt, temperature: 0})
@@ -567,7 +550,7 @@ Answer:`;
     document.getElementById('r1-0').innerHTML = r1_0;
     btn.textContent = '⏳ Running... (2/6)';
 
-    const r1_07 = await fetch('/api/generate', {
+    const r1_07 = await fetch('/temperature/api/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({question: prompt, temperature: 0.7})
@@ -575,7 +558,7 @@ Answer:`;
     document.getElementById('r1-07').innerHTML = r1_07;
     btn.textContent = '⏳ Running... (3/6)';
 
-    const r1_10 = await fetch('/api/generate', {
+    const r1_10 = await fetch('/temperature/api/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({question: prompt, temperature: 1.0})
@@ -583,7 +566,7 @@ Answer:`;
     document.getElementById('r1-10').innerHTML = r1_10;
     btn.textContent = '⏳ Running... (4/6)';
 
-    const r2_0 = await fetch('/api/generate', {
+    const r2_0 = await fetch('/temperature/api/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({question: prompt, temperature: 0})
@@ -591,7 +574,7 @@ Answer:`;
     document.getElementById('r2-0').innerHTML = r2_0;
     btn.textContent = '⏳ Running... (5/6)';
 
-    const r2_07 = await fetch('/api/generate', {
+    const r2_07 = await fetch('/temperature/api/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({question: prompt, temperature: 0.7})
@@ -599,7 +582,7 @@ Answer:`;
     document.getElementById('r2-07').innerHTML = r2_07;
     btn.textContent = '⏳ Running... (6/6)';
 
-    const r2_10 = await fetch('/api/generate', {
+    const r2_10 = await fetch('/temperature/api/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({question: prompt, temperature: 1.0})
@@ -612,7 +595,7 @@ Answer:`;
 
     // Fetch similarity data for final insights
     const getSimilarity = async (a, b) => {
-      const res = await fetch('/api/compare', {
+      const res = await fetch('/temperature/api/compare', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({text1: a, text2: b})
@@ -654,34 +637,41 @@ Answer:`;
 </body>
 </html>
 """
-
-@app.route('/')
-def index():
-    return render_template_string(
-        HTML_TEMPLATE,
-        model_name=model,
-        prompts=PROMPTS
-    )
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def calculate_similarity(text1, text2):
     """Calculate similarity score between two texts (0-1)"""
-    from difflib import SequenceMatcher
-
-    # Normalize texts
     t1 = text1.lower().strip()
     t2 = text2.lower().strip()
-
-    # Exact match
     if t1 == t2:
         return 1.0
-
-    # Calculate similarity ratio
     ratio = SequenceMatcher(None, t1, t2).ratio()
     return round(ratio, 2)
 
-@app.route('/api/generate', methods=['POST'])
+# Routes
+@temperature_bp.route('/')
+def index():
+    from flask import current_app
+    model_name = get_model()
+
+    # Add navigation if function exists
+    template = HTML_TEMPLATE
+    if hasattr(current_app, 'add_navigation'):
+        template = current_app.add_navigation(HTML_TEMPLATE, "Temperature Experiment")
+
+    return render_template_string(
+        template,
+        model_name=model_name,
+        prompts=PROMPTS
+    )
+
+@temperature_bp.route('/api/generate', methods=['POST'])
 def generate():
     try:
+        client = get_client()
+        model = get_model()
         data = request.json
         question = data.get('question', '').strip()
         temperature = float(data.get('temperature', 0.7))
@@ -702,7 +692,7 @@ def generate():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/compare', methods=['POST'])
+@temperature_bp.route('/api/compare', methods=['POST'])
 def compare():
     """Compare two texts and return similarity score"""
     try:
@@ -724,16 +714,3 @@ def compare():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    print("\n" + "="*70)
-    print("🧪 Temperature Experiment Server Starting...")
-    print("="*70)
-    print("\n📖 Open your browser: http://localhost:5001")
-    print("\nExperiment:")
-    print("  • Run same question with different temperatures")
-    print("  • T=0.0: Same every time (consistent)")
-    print("  • T=0.7: Similar with variation")
-    print("  • T=1.0: Different each time (creative)")
-    print("\n" + "="*70 + "\n")
-    app.run(debug=True, port=5001)

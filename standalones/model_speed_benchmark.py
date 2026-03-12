@@ -764,7 +764,7 @@ if __name__ == '__main__':
     print("\n" + "="*70)
     print("🏁 Model Speed Benchmark Server Starting...")
     print("="*70)
-    print("\n📖 Open your browser: http://localhost:5002")
+    print("\n📖 Open your browser: http://127.0.0.1:5002")
     print("\nExperiment:")
     print("  • Compare speed of Haiku, Sonnet, and Opus models")
     print("  • Measure TTFT (Time to First Token) and total response time")
